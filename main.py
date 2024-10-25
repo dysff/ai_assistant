@@ -13,8 +13,6 @@ google_api_key = os.getenv('GOOGLE_CSE_API_KEY')
 search_engine = os.getenv('SEARCH_ENGINE_ID')
 openai.api_key = os.getenv('CHAT_GPT_API_KEY')
 
-import requests
-
 def search_news(query):
   url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={google_api_key}&cx={search_engine}"
   response = requests.get(url).json()
