@@ -4,11 +4,15 @@ from typing import Optional
 class Messages(SQLModel, table=True):
   id: Optional[int] = Field(default=None, primary_key=True)
   chat_id: Optional[int]
-  role: str
-  content: str
+  prompt: str
+  response: str
 
-msg = Messages(role='user', content='Gradient Descent Algorithm')
+def start_db():
+  URL_DATABASE = 'postgresql://postgres:140817@localhost:5432/agent'
+  engine = create_engine(URL_DATABASE)
+  SQLModel.metadata.create_all(engine)
+  
+  return engine
 
-URL_DATABASE = 'postgresql://postgres:140817@localhost:5432/agent'
-engine = create_engine(URL_DATABASE)
-SQLModel.metadata.create_all(engine)
+if __name__ == '__main__':
+  engine = start_db()

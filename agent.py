@@ -9,6 +9,9 @@ from langchain.agents import AgentExecutor
 from langchain_core.prompts.chat import MessagesPlaceholder
 from langchain_core.prompts.chat import ChatPromptTemplate
 from langchain_community.callbacks import StreamlitCallbackHandler
+from main import Messages, start_db
+from sqlmodel import Session, select
+from sqlalchemy.sql import func
 
 load_dotenv('.env')
 
@@ -27,9 +30,21 @@ google_tool = Tool(
   func=search.run,
 )
 
-def main():
+def store_data(engine, chat_id, prompt, response):
+  with Session(engine) as session:
+    data = Messages(chat_id=chat_id, prompt=prompt, response=response)
+    session.add(data)
+    session.commit()
+    
+def load_session_data(engine, chat_id):
+  with Session(engine) as session:
+    result = session.exec(select(Messages).where(Messages.chat_id == chat_id)).all()
+
+    return result
+
+def main():  
   llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=0.9)
-  system_prompt = 'Create clear blog from the following information without special characters. Divide it into paragraphs to highlight different subtopics'
+  system_prompt = 'Compelete this task'
 
   prompt_template = ChatPromptTemplate.from_messages(
     [
@@ -42,31 +57,55 @@ def main():
     
   agent = create_tool_calling_agent(llm, [google_tool], prompt_template)
   agent_executor = AgentExecutor(agent=agent, tools=[google_tool])
+  engine = start_db()
   
-  st.title("💬 BlogBot")
+  st.title("💬 ChatBot")
+      
+  with Session(engine) as session:
+    chat_id = session.exec(select(func.max(Messages.chat_id))).one()
   
-  if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-      {"role": "assistant", "content": "Hi, I'm a blogbot who can make blog for any theme. How can I help you?"}
-    ]
+  if chat_id == None:
+    chat_id = 0
+    st.chat_message('assistant').write("How can I help you?")
   
-  for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+  else:
+    session_data = load_session_data(engine=engine, chat_id=chat_id)
     
-  if prompt := st.chat_input(placeholder='Gradient Descent Algorithm'):
-    st.session_state.messages.append({
-      'role': 'user', 'content': prompt
-    })
-    st.chat_message('user').write(prompt)
+    for msg in session_data:
+      st.chat_message('user').write(msg.prompt)
+      st.chat_message('assistant').write(msg.response)
+              
+  if user_prompt := st.chat_input(placeholder='Your message'):
+    st_callback = StreamlitCallbackHandler(st.container())
+    response = agent_executor.invoke({'input': user_prompt}, {"callbacks": [st_callback]})
+    response = response['output']
     
-    with st.chat_message('assistant'):
-      st_callback = StreamlitCallbackHandler(st.container())
-      blog = agent_executor.invoke({'input': 'Find' + prompt}, {"callbacks": [st_callback]})
-      blog = blog['output']
-      slogan = llm.invoke(f'Highlight the main essence of this text into a slogan: {blog}')
-      blog = f'{slogan.content}\n\n{blog}'
-      st.session_state.messages.append({"role": "assistant", "content": blog})
-      st.write(blog)
+    st.chat_message('user').write(user_prompt)
+    st.chat_message('assistant').write(response)
+    store_data(engine=engine, chat_id=chat_id, prompt=user_prompt, response=response)
+  
+  # if "messages" not in st.session_state:
+  #   st.session_state["messages"] = [
+  #     {"role": "assistant", "content": "Hi, I'm a blogbot who can make blog for any theme. How can I help you?"}
+  #   ]
+  
+  # for msg in st.session_state.messages:
+  #   st.chat_message(msg["role"]).write(msg["content"])
+    
+  # if prompt := st.chat_input(placeholder='Gradient Descent Algorithm'):
+  #   st.session_state.messages.append({
+  #     'role': 'user', 'content': prompt
+  #   })
+  #   st.chat_message('user').write(prompt)
+    
+  #   with st.chat_message('assistant'):
+  #     st_callback = StreamlitCallbackHandler(st.container())
+  #     blog = agent_executor.invoke({'input': 'Find' + prompt}, {"callbacks": [st_callback]})
+  #     blog = blog['output']
+  #     slogan = llm.invoke(f'Highlight the main essence of this text into a slogan: {blog}')
+  #     blog = f'{slogan.content}\n\n{blog}'
+  #     st.session_state.messages.append({"role": "assistant", "content": blog})
+  #     st.write(blog)
   
 if __name__ == '__main__':
   main()
