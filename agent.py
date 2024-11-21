@@ -13,6 +13,7 @@ from langchain.memory import ConversationBufferMemory
 from main import Messages, start_db
 from sqlmodel import Session, select
 from sqlalchemy.sql import func
+from datetime import datetime
 
 load_dotenv('.env')
 
@@ -31,9 +32,9 @@ google_tool = Tool(
   func=search.run,
 )
 
-def store_data(engine, chat_id, prompt, response):
+def store_data(engine, role, message, chat_id):
   with Session(engine) as session:
-    data = Messages(chat_id=chat_id, prompt=prompt, response=response)
+    data = Messages(role=role, message=message, date=datetime.now(), chat_id=chat_id)
     session.add(data)
     session.commit()
     
@@ -45,13 +46,12 @@ def load_session_data(engine, chat_id):
 
 def main():  
   llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=0.9)
-  system_prompt = 'Complete this task'
+  system_prompt = 'Create clear blog from the following information without special characters. Divide it into paragraphs to highlight different subtopics'
 
-  # Correctly initialize the chat history as a list
   prompt_template = ChatPromptTemplate.from_messages(
     [
       ("system", system_prompt),
-      MessagesPlaceholder("chat_history", optional=True),  # Placeholder for memory
+      MessagesPlaceholder("chat_history", optional=True),
       ("human", "{input}"),
       MessagesPlaceholder("agent_scratchpad"),
     ]
@@ -60,7 +60,7 @@ def main():
   memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
   engine = start_db()
   
-  st.title("💬 ChatBot")
+  st.title("💬 BlogBot")
   
   with Session(engine) as session:
     chat_id = session.exec(select(func.max(Messages.chat_id))).one()
@@ -73,25 +73,32 @@ def main():
     session_data = load_session_data(engine=engine, chat_id=chat_id)
 
     for msg in session_data:
-      st.chat_message('user').write(msg.prompt)
-      st.chat_message('assistant').write(msg.response)
-          
-      memory.chat_memory.add_user_message(msg.prompt)
-      memory.chat_memory.add_ai_message(msg.response)
+      st.chat_message(msg.role).write(msg.message)
+      
+      if msg.role == 'user':
+        memory.chat_memory.add_user_message(msg.message)
+      
+      else:
+        memory.chat_memory.add_ai_message(msg.message)
   
   agent = create_tool_calling_agent(llm, [google_tool], prompt_template)
   agent_executor = AgentExecutor(agent=agent, tools=[google_tool], memory=memory)
   
   if user_prompt := st.chat_input(placeholder='Your message'):
     st_callback = StreamlitCallbackHandler(st.container())
-    response = agent_executor.invoke({'input': user_prompt}, {"callbacks": [st_callback]})
+    response = agent_executor.invoke({'input': 'Find ' + user_prompt}, {"callbacks": [st_callback]})
     response = response['output']
+    slogan = llm.invoke(f'Highlight the main essence of this text into a slogan: {response}')
+    blog = f'{slogan.content}\n\n{response}'
     
     st.chat_message('user').write(user_prompt)
-    st.chat_message('assistant').write(response)
+    st.chat_message('assistant').write(blog)
+    
     memory.chat_memory.add_user_message(user_prompt)
-    memory.chat_memory.add_ai_message(response)
-    store_data(engine=engine, chat_id=chat_id, prompt=user_prompt, response=response)
+    memory.chat_memory.add_ai_message(blog)
+    
+    store_data(engine=engine, role='user', message=user_prompt, chat_id=chat_id)
+    store_data(engine=engine, role='assistant', message=blog, chat_id=chat_id)
   
 if __name__ == '__main__':
   main()

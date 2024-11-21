@@ -1,11 +1,13 @@
 from sqlmodel import Field, Session, SQLModel, create_engine
 from typing import Optional
+from datetime import datetime
 
 class Messages(SQLModel, table=True):
   id: Optional[int] = Field(default=None, primary_key=True)
+  role: str
+  message: str
+  date: datetime
   chat_id: Optional[int]
-  prompt: str
-  response: str
 
 def start_db():
   URL_DATABASE = 'postgresql://postgres:140817@localhost:5432/agent'
